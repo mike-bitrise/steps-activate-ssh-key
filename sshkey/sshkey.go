@@ -3,7 +3,7 @@ package sshkey
 import (
 	"fmt"
 	"os"
-	"path/filepath"
+	"strings"
 
 	"github.com/bitrise-io/go-utils/command"
 	"github.com/bitrise-io/go-utils/fileutil"
@@ -66,47 +66,18 @@ func (a defaultAgent) ListKeys() (int, error) {
 	return cmd.RunAndReturnExitCode()
 }
 
-func createAddSSHKeyScript(sshKeyPth string) string {
-	return fmt.Sprintf(`expect <<EOD
-spawn ssh-add %s
-expect {
-	"Enter passphrase for" {
-		exit 1
-	}
-	"Identity added" {
-		exit 0
-	}
-}
-send "nopass\n"
-EOD
-if [ $? -ne 0 ] ; then
-exit 1
-fi`, sshKeyPth)
-}
-
-const addSSHKeyScriptFileName = "tmp_spawn.sh"
-
 // AddKey ...
 func (a defaultAgent) AddKey(sshKeyPth, socket string) error {
-	pth, err := a.tempDirProvider.CreateTempDir("spawn")
-	if err != nil {
-		return err
-	}
-
-	filePth := filepath.Join(pth, addSSHKeyScriptFileName)
-	if err := a.fileWriter.Write(filePth, createAddSSHKeyScript(sshKeyPth), 0770); err != nil {
-		return fmt.Errorf("failed to write the SSH key to the provided path, %s", err)
-	}
-
 	var envs []string
 	if socket != "" {
 		envs = append(envs, "SSH_AUTH_SOCK="+socket)
 	}
 
-	cmd := a.cmdFactory.Create("bash", []string{"-c", filePth}, &command.Opts{
+	cmd := a.cmdFactory.Create("ssh-add", []string{sshKeyPth}, &command.Opts{
 		Stdout: os.Stdout,
 		Stderr: os.Stderr,
-		Env:    envs,
+		Env:    append(envs, "SSH_ASKPASS=cat"),
+		Stdin:  strings.NewReader("nopass"),
 	})
 
 	a.logger.Println()
